@@ -1,0 +1,516 @@
+import pandas as pd
+import numpy as np
+from scipy.stats import norm
+%matplotlib inline
+import matplotlib.pyplot as plt
+import seaborn as sns
+import warnings; warnings.simplefilter('ignore')
+
+train=pd.read_csv('train.csv', index_col='Id')
+test=pd.read_csv('test.csv', index_col='Id')
+data=train
+print(train.shape, test.shape)
+
+
+# 타겟 변수 확인
+figure, (ax1, ax2) = plt.subplots(nrows=1, ncols=2)
+figure.set_size_inches(14, 6)
+sns.distplot(data['SalePrice'], fit=norm, ax=ax1)
+sns.distplot(np.log(data['SalePrice']+1), fit=norm, ax=ax2)
+
+
+# 좌: 타겟 변수의 분포        우: 타겟변수에 로그를 취한 분포
+
+# 심한 비대칭은 머신러닝 알고리즘이 학습을 잘 하지 못하도록 방해
+
+# 변수 간 상관관계 확인
+corr = data.select_dtypes(include=['number']).corr()
+top_corr = data[corr.nlargest(40, 'SalePrice')['SalePrice'].index].corr()
+
+figure, ax1 = plt.subplots(nrows=1, ncols=1)
+figure.set_size_inches(20,15)
+sns.heatmap(top_corr, annot=True, ax=ax1)
+
+# 위 그래프는 타겟 변수인 'SalePrice'와
+# 가장 큰 상관관계를 가진 40개의 변수를 표시한 히트맵 그래프
+
+#변수 'OverallQual' 이라는 변수가 상관계수 0.79로
+#타겟변수와 가장 큰 상관관계를 가지고 있는 것으로 나타났다.
+#전반적으로 OverallQual 이 증가하면, 집값도 증가한다고 볼 수 있다는 뜻이다.
+
+
+plt.figure(figsize=(10,6))
+sns.regplot(x='GrLivArea', y='SalePrice', data=data)
+
+# GrLivArea와 SalePrice의 관계를 표시한 그래프.
+# 두번째로 큰 상관계수를 가진 GrLivArea의 그래프를 나타낸 것.
+
+# 전체적으로 GrLivArea가 증가하면, 집 값도 증가함
+
+# 오른쪽 아래 두 점은 전혀 다른 결과를 나타냄 => 이상치!!
+# 이상치를 제거해야 머신러닝의 정확도를 높일 수 있음
+
+
+# 이상치 제거
+train=train.drop(train[(train['GrLivArea']>4000) & (train['SalePrice']<300000)].index)
+
+
+
+# 본격적으로 데이터 처리할 준비하기
+
+# train과 test에 코드를 두 번 쓰지 않고,
+#train과 test를 묶어서 all_data라는 변수에 저장한 후 이를 처리.
+
+Ytrain=train['SalePrice']
+train=train[list(test)]
+all_data=pd.concat((train,test), axis=0)
+print(all_data.shape)
+Ytrain=np.log(Ytrain+1)
+
+
+# 타겟변수를 미리 Ytrain으로 빼서 저장하고, 로그를 씌웠음.
+
+# 로그를 쓰는데 +1을 한 이유?
+# => log0의 값이 없기 때문.
+
+# log0은 마이너스 무한대로 커지기 때문에, +1씩 해주어서 이를 방지
+# => 이걸 'log1p' 라고 함!
+
+
+# 결측치 처리하기
+
+# 집에 해당 시설이 없는 경우 결측치로 처리되어 있음
+
+cols = list(all_data)
+for col in list(all_data):
+  if (all_data[col].isnull().sum())==0:
+    cols.remove(col)
+  else:
+    pass
+print(len(cols))
+
+#list(all_data)를 사용
+#-> all_data라는 데이터프레임의 열 이름을 리스트로 만들 수 있음
+
+
+
+#반복문을 통해 all_data에서 해당 열에 결측치가 없으면 리스트에서 그 열의 이름을 지우기.
+# 남은 리스트에는 결측치가 있는 변수 이름만 남아있을 것임.
+
+for col in ('PoolQC', 'MiscFeature', 'Alley', 'Fence', 'FireplaceQu', 'GarageType', 'GarageFinish', 'GarageQual', 'GarageCond', 'BsmtQual', 'BsmtCond', 'BsmtExposure', 'BsmtFinType1', 'BsmtFinType2', 'MasVnrType', 'MSSubClass'):
+    all_data[col] = all_data[col].fillna('None')
+
+for col in ('GarageYrBlt', 'GarageArea', 'GarageCars', 'BsmtFinSF1', 'BsmtFinSF2', 'BsmtUnfSF','TotalBsmtSF', 'BsmtFullBath', 'BsmtHalfBath', 'MasVnrArea','LotFrontage'):
+    all_data[col] = all_data[col].fillna(0)
+    
+for col in ('MSZoning', 'Electrical', 'KitchenQual', 'Exterior1st', 'Exterior2nd', 'SaleType', 'Functional', 'Utilities'):
+    all_data[col] = all_data[col].fillna(all_data[col].mode()[0])
+    
+print(f"Total count of missing values in all_data : {all_data.isnull().sum().sum()}")
+
+
+# 1. 집에 해당 시설물이 없는 경우(범주형 변수)
+#  => 결측치를 'None'이라는 문자열로 채운다
+
+# 2. 집에 해당 시설물이없는 경우(수치형 변수)
+#  => 결측치를 0으로 채운다
+
+# 3. 해당 시설물이 없다고 보기 힘든 경우
+#  => 결측치를 해당 열의 최빈값으로 채운다
+# (ex. 집이 판매되었는데 거래 타입이 정해지지 않을리는 없음)
+
+
+
+# 본격적으로 데이터 분석 (EDA)
+#    새로운 몇 개의 변수 만들기
+
+
+# 1) 총 가용면적
+
+figure, ((ax1, ax2), (ax3, ax4)) = plt.subplots(nrows=2, ncols=2)
+figure.set_size_inches(14,10)
+
+# 새로운 변수를 추가 (TotalSF: 총 가용면적)
+data['TotalSF'] = data['TotalBsmtSF'] + data['1stFlrSF'] + data['2ndFlrSF']
+
+# **수정:** x, y 인수에 컬럼명을 문자열로 전달하고, data 인수에 데이터프레임을 전달
+sns.regplot(x='TotalBsmtSF', y='SalePrice', data=data, ax=ax1, color='blue')
+sns.regplot(x='1stFlrSF', y='SalePrice', data=data, ax=ax2, color='orange')
+sns.regplot(x='2ndFlrSF', y='SalePrice', data=data, ax=ax3, color='green')
+sns.regplot(x='TotalSF', y='SalePrice', data=data, ax=ax4, color='red') 
+# data['TotalBsmtSF'] + data['1stFlrSF'] + data['2ndFlrSF'] 대신 미리 정의한 'TotalSF' 사용
+
+plt.show() # 그래프를 출력
+
+# 빨간색 그래프 -> 총가용면적 (TotalSF)
+#  나머지 3개를 합한 면적을 나타낸 그래프!
+#  총 면적이 증가하면 집값이 더 비싸진다고 볼 수 있음
+
+
+# 이들을 더해서 'TotalSF'라는 이름으로 저장
+# 추가로 'No2ndFlr', 'NoBsmt' 변수를 만들어서 
+#   => 2층 없음, 지하실 없음 여부 나타내도록 함
+
+all_data['TotalSF']=all_data['TotalBsmtSF'] + all_data['1stFlrSF'] + all_data['2ndFlrSF']
+all_data['No2ndFlr']=(all_data['2ndFlrSF']==0)
+all_data['NoBsmt']=(all_data['TotalBsmtSF']==0)
+
+
+
+# 2) 총 욕실 수
+
+# 1. TotalBath 컬럼 정의 (편의상 모든 욕실 수를 단순 합산)
+data['TotalBath'] = data['BsmtFullBath'] + data['FullBath'] + data['BsmtHalfBath'] + data['HalfBath']
+
+# 2. 실질적인 욕실 수를 나타내는 WeightedBath 컬럼 정의 (HalfBath는 0.5로 계산)
+data['WeightedBath'] = data['BsmtFullBath'] + data['FullBath'] + (data['BsmtHalfBath']/2) + (data['HalfBath']/2)
+
+
+# 첫 번째 2x2 서브플롯
+figure, ((ax1, ax2), (ax3, ax4)) = plt.subplots(nrows=2, ncols=2)
+figure.set_size_inches(14,10)
+
+# **수정:** x, y 인수에 컬럼명을 문자열로 전달하고, data 인수에 데이터프레임을 전달
+sns.barplot(x='BsmtFullBath', y='SalePrice', data=data, ax=ax1)
+sns.barplot(x='FullBath', y='SalePrice', data=data, ax=ax2)
+sns.barplot(x='BsmtHalfBath', y='SalePrice', data=data, ax=ax3)
+sns.barplot(x='HalfBath', y='SalePrice', data=data, ax=ax4)
+
+plt.tight_layout() # 서브플롯 간의 간격 자동 조정
+
+# 두 번째 1x1 서브플롯 (총 욕실 수)
+figure, ax5 = plt.subplots(nrows=1, ncols=1)
+figure.set_size_inches(14,6)
+
+# **수정:** 미리 계산한 'WeightedBath' 컬럼을 x 인수로 사용
+sns.barplot(x='WeightedBath', y='SalePrice', data=data, ax=ax5)
+ax5.set_title('Weighted Total Bathrooms vs SalePrice')
+
+plt.show() # 그래프 출력
+
+
+# 욕실갯수 -> FullBath, HalfBath, 지하에 있는지 여부 -> 총 4개의 열
+#    => 이것들을 모두 더해 하나로 만듦.
+
+# FullBath - 욕조 및 샤워 시설 포함된 욕실
+# HalfBath - 변기와 세면대 정도 있는 간단한 욕실
+
+# FullBath는 1개로 카운트, HalfBath는 0.5개로 카운트
+
+
+
+# 마지막 그래프는 욕실 수의 총 합!
+
+
+# <해석>
+#   => 욕실 수가 많을수록 더 집값이 비싸진다고 볼 수 있음
+
+# 검정 선은 편차인데, 욕실갯수가 5,6개인 집은 아마도 그러한 집이 각각 하나씩밖에 없다는 뜻으로 볼 수 있음
+#    => 이상치(outliner)로 판단하고 지워도 상관 없음
+
+all_data['TotalBath']=all_data['BsmtFullBath'] + all_data['FullBath'] + (all_data['BsmtHalfBath']/2) + (all_data['HalfBath']/2)
+
+
+# 3) 건축연도 + 리모델링 연도 
+#   => 이 두 가지는 비슷한 분포라서 모두를 포함하는 데이터를 추가할것임
+
+data['AvgYear'] = (data['YearBuilt'] + data['YearRemodAdd']) / 2
+
+figure, (ax1, ax2, ax3) = plt.subplots(nrows=1, ncols=3)
+figure.set_size_inches(18,8)
+
+# **수정:** x, y 인수에 컬럼명을 문자열로 전달하고, data 인수에 데이터프레임을 전달
+sns.regplot(x='YearBuilt', y='SalePrice', data=data, ax=ax1, color='blue')
+sns.regplot(x='YearRemodAdd', y='SalePrice', data=data, ax=ax2, color='orange')
+# **수정:** 미리 계산한 'AvgYear' 컬럼을 x 인수로 사용
+sns.regplot(x='AvgYear', y='SalePrice', data=data, ax=ax3, color='green')
+
+ax1.set_title('Year Built vs SalePrice')
+ax2.set_title('Year Remodeled vs SalePrice')
+ax3.set_title('Average Year vs SalePrice')
+
+plt.tight_layout()
+plt.show()
+#        건축연도(YearBuilt)               리모델링연도(YearRemodAdd)           둘의 평균(AverageYear)
+
+# 건축 연도가 오래 되었어도, 최근에 리모델링을 하면 값이 높게 나올 것이고,
+# 건축 이후 리모델링을 하지 않았다면 이 값은 아주 낮게 나왔을 것.
+
+# 따라서,
+# 이 값이 높은 집들은 '지어진지 얼마 되지 않은 신축 건물 + 최근에 리모델링까지 함'에 가깝고,
+# 이 값이 낮은 집들은 '지어진지 오래 된 구축 건물 + 리모델링도 안 함'에 가까울 것이다
+
+# (초록색 그래프를 참고하면 알 수 있음)
+
+
+
+# 이 AverageYear 값을 'YrBltAndRemod'라는 이름으로 두 변수를 저장
+
+all_data['YrBltAndRemod'] = all_data['YearBuilt'] + all_data['YearRemodAdd']
+
+
+
+#  <자료형 수정하기>
+
+all_data['MSSubClass']=all_data['MSSubClass'].astype(str)
+all_data['MoSold']=all_data['MoSold'].astype(str)
+all_data['YrSold']=all_data['YrSold'].astype(str)
+
+# 'MSSubClass'는 사실 숫자로 이루어진 데이터지만, 각각의 숫자가 의미를 갖고있는 범주형 변수임.
+# 그리고 판매 연,월도 연산 개념을 적용하는 데에 무리가 있음
+
+#     => 이들을 문자열로 바꿔주자!
+
+# 집을 볼 때 좋고 나쁨을 판단할듯? => 집의 각 시설물에 점수를 매기기
+
+
+# <지하실 점수(Bsmt)>
+
+# 지하실에 관한 변수들을 묶어서 저장
+Basement = ['BsmtCond', 'BsmtExposure', 'BsmtFinSF1', 'BsmtFinSF2', 'BsmtFinType1', 'BsmtFinType2', 'BsmtQual', 'BsmtUnfSF', 'TotalBsmtSF']
+Bsmt=all_data[Basement]
+
+# 각 변수들을 인코딩
+Bsmt=Bsmt.replace(to_replace='Po', value=1)
+Bsmt=Bsmt.replace(to_replace='Fa', value=2)
+Bsmt=Bsmt.replace(to_replace='TA', value=3)
+Bsmt=Bsmt.replace(to_replace='Gd', value=4)
+Bsmt=Bsmt.replace(to_replace='Ex', value=5)
+Bsmt=Bsmt.replace(to_replace='None', value=0)
+
+Bsmt=Bsmt.replace(to_replace='No', value=1)
+Bsmt=Bsmt.replace(to_replace='Mn', value=2)
+Bsmt=Bsmt.replace(to_replace='Av', value=3)
+Bsmt=Bsmt.replace(to_replace='Gd', value=4)
+
+Bsmt=Bsmt.replace(to_replace='Unf', value=1)
+Bsmt=Bsmt.replace(to_replace='LwQ', value=2)
+Bsmt=Bsmt.replace(to_replace='Rec', value=3)
+Bsmt=Bsmt.replace(to_replace='BLQ', value=4)
+Bsmt=Bsmt.replace(to_replace='ALQ', value=5)
+Bsmt=Bsmt.replace(to_replace='GLQ', value=6)
+
+# 순서대로 좋은 값에는 높은 숫자 / 안 좋은 값에는 낮은 숫자 / 지하실이 없으면 0
+
+
+# 몇 개 항목들을 곱해서 'BsmtScore' 항목을 만들어 지하실의 전반적인 상태를 평가하는 변수 만들기
+
+Bsmt['BsmtScore']= Bsmt['BsmtQual']  * Bsmt['BsmtCond'] * Bsmt['TotalBsmtSF']
+all_data['BsmtScore']=Bsmt['BsmtScore']
+
+#BsmtFin : 지하실이 공사중이라면, 완성 면적과 상태를 포함하는 변수
+Bsmt['BsmtFin'] = (Bsmt['BsmtFinSF1'] * Bsmt['BsmtFinType1']) + (Bsmt['BsmtFinSF2'] * Bsmt['BsmtFinType2'])
+#BsmtFinScore : 지하실의 완성도 점수
+all_data['BsmtFinScore']=Bsmt['BsmtFin']
+#BsmtDNF : 지하실의 미완성 여부
+all_data['BsmtDNF']=(all_data['BsmtFinScore']==0)
+
+
+#  < 토지 점수(Lot) >
+
+lot=['LotFrontage', 'LotArea','LotConfig','LotShape']
+Lot=all_data[lot]
+
+Lot['LotScore'] = np.log((Lot['LotFrontage'] * Lot['LotArea'])+1)
+
+all_data['LotScore']=Lot['LotScore']
+
+# 지하실 점수와 비슷하게 토지면적과 모양, 접근성 등을 고려하는 점수를 만들어 'LotScore'로 저장
+
+
+#  < 차고 점수(Garage) >
+
+garage=['GarageArea','GarageCars','GarageCond','GarageFinish','GarageQual','GarageType','GarageYrBlt']
+Garage=all_data[garage]
+all_data['NoGarage']=(all_data['GarageArea']==0)
+
+
+# 각 변수 인코딩
+Garage=Garage.replace(to_replace='Po', value=1)
+Garage=Garage.replace(to_replace='Fa', value=2)
+Garage=Garage.replace(to_replace='TA', value=3)
+Garage=Garage.replace(to_replace='Gd', value=4)
+Garage=Garage.replace(to_replace='Ex', value=5)
+Garage=Garage.replace(to_replace='None', value=0)
+
+Garage=Garage.replace(to_replace='Unf', value=1)
+Garage=Garage.replace(to_replace='RFn', value=2)
+Garage=Garage.replace(to_replace='Fin', value=3)
+
+Garage=Garage.replace(to_replace='CarPort', value=1)
+Garage=Garage.replace(to_replace='Basment', value=4)
+Garage=Garage.replace(to_replace='Detchd', value=2)
+Garage=Garage.replace(to_replace='2Types', value=3)
+Garage=Garage.replace(to_replace='Basement', value=5)
+Garage=Garage.replace(to_replace='Attchd', value=6)
+Garage=Garage.replace(to_replace='BuiltIn', value=7)
+
+# GarageScore 변수로 차고의 종합 점수 판단
+Garage['GarageScore']=(Garage['GarageArea']) * (Garage['GarageCars']) * (Garage['GarageFinish']) * (Garage['GarageQual']) * (Garage['GarageType'])
+all_data['GarageScore']=Garage['GarageScore']
+
+
+#  < 기타 변수 >
+
+# 1) 비정상적으로 하나의 값만 많은 변수들 삭제
+
+all_data = all_data.drop(columns=['Street','Utilities','Condition2','RoofMatl','Heating'], 
+                         errors='ignore')
+
+# 2) 비정상적으로 빈 값이 많은 변수들 삭제
+
+# case1 : 수영장이 있는 집
+figure, (ax1, ax2) = plt.subplots(nrows=1, ncols=2)
+figure.set_size_inches(14,6)
+sns.regplot(data=data, x='PoolArea', y='SalePrice', ax=ax1)
+sns.barplot(data=data, x='PoolQC', y='SalePrice', ax=ax2)
+# 거의 모든 집들이 0에 머물러있음 -> 그만큼 수영장이 있는 집의 값은 0이 많음
+
+# case2 : 테니스코트가 있는 집
+
+figure, (ax1, ax2) = plt.subplots(nrows=1, ncols=2)
+figure.set_size_inches(14,6)
+sns.regplot(data=data, x='MiscVal', y='SalePrice', ax=ax1)
+sns.barplot(data=data, x='MiscFeature', y='SalePrice', ax=ax2)
+
+# 변수 삭제
+all_data=all_data.drop(columns=['MiscVal','MiscFeature'])
+
+
+# 3) (채워진)결측치가 많은 경우
+
+sns.regplot(data=data, x='LowQualFinSF', y='SalePrice')
+sns.regplot(data=data, x='OpenPorchSF', y='SalePrice')
+sns.regplot(data=data, x='WoodDeckSF', y='SalePrice')
+
+# 0값만 분리해주면 결과가 괜찮을듯? => 0만 분리시키기
+all_data['NoLowQual']=(all_data['LowQualFinSF']==0)
+all_data['NoOpenPorch']=(all_data['OpenPorchSF']==0)
+all_data['NoWoodDeck']=(all_data['WoodDeckSF']==0)
+
+
+#  3. 전처리
+
+# 3.1. 범주형 변수
+
+# 범주형 변수를 다짜고짜 1, 2, 3, ..으로 인코딩하면 머신러닝이 오해할 수 있음
+#    => 모조리 원핫 인코딩하기 (각 범주에 해당하는 고유한 벡터를 만드는 것)
+
+# **수정:** np.object 대신 내장 타입 object 사용
+non_numeric = all_data.select_dtypes(object)
+
+def onehot(col_list):
+    global all_data
+    while len(col_list) !=0:
+        col=col_list.pop(0)
+        data_encoded=pd.get_dummies(all_data[col], prefix=col)
+        all_data=pd.merge(all_data, data_encoded, on='Id')
+        all_data=all_data.drop(columns=col)
+    print(all_data.shape)
+    
+onehot(list(non_numeric))
+
+
+# 3.2. 수치형 변수
+
+# 비대칭이 너무 심해지지 않게끔, RightSkewed(오른쪽치우침)가 크게 되어있는 데이터들에만 log 씌우기
+
+numeric=all_data.select_dtypes(np.number)
+
+def log_transform(col_list):
+    transformed_col=[]
+    while len(col_list)!=0:
+        col=col_list.pop(0)
+        if all_data[col].skew() > 0.5:
+            all_data[col]=np.log(all_data[col]+1)
+            transformed_col.append(col)
+        else:
+            pass
+    print(f"{len(transformed_col)} features had been tranformed")
+    print(all_data.shape)
+
+log_transform(list(numeric))
+
+
+# FINALLY!!!!!
+
+# all_data 항목을 test데이터의 갯수에 맞게끔 잘라서 따로 저장하기
+
+print(train.shape, test.shape)
+Xtrain=all_data[:len(train)]
+Xtest=all_data[len(train):]
+print(Xtrain.shape, Xtest.shape)
+
+
+# 4. 머신러닝 모델로 학습
+
+from sklearn.linear_model import ElasticNet, Lasso
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import RobustScaler
+from xgboost import XGBRegressor
+import time
+import optuna
+from sklearn.model_selection import cross_val_score
+from sklearn.metrics import mean_squared_error
+model_Lasso= make_pipeline(RobustScaler(), Lasso(alpha =0.000327, random_state=18))
+
+model_ENet = make_pipeline(RobustScaler(), ElasticNet(alpha=0.00052, l1_ratio=0.70654, random_state=18))
+
+model_GBoost = GradientBoostingRegressor(n_estimators=3000, learning_rate=0.05, max_depth=4, max_features='sqrt', min_samples_leaf=15, 
+                                         min_samples_split=10, loss='huber', random_state=18)
+
+model_XGB=XGBRegressor(colsample_bylevel=0.9229733609038979,colsample_bynode=0.21481791874780318,colsample_bytree=0.607964318297635, 
+                       gamma=0.8989889254961725, learning_rate=0.009192310189734834, max_depth=3, n_estimators=3602, 
+                       reg_alpha=3.185674564163364e-12,reg_lambda=4.95553539265423e-13, seed=18, subsample=0.8381904293270576,
+                       tree_method='hist',verbosity=0)
+
+
+
+#Lasso, ElasticNet, sklearn의 GradientBoosting, XGBoost 4개의 모델을 불러와서 저장한다. 
+#최종 예측 결과물은 이 4개의 모델의 예측값의 평균값을 사용해 제출할 것이다. 
+
+import numpy as np
+import pandas as pd
+from sklearn.metrics import mean_squared_error
+
+# ⚠️ 이 부분은 'submission' 객체를 정의하기 위한 예시입니다.
+# 실제 파일명과 변수명에 맞게 수정해야 합니다.
+# 원본 테스트 데이터를 불러와서 Id 컬럼을 확보합니다.
+try:
+    # 이전에 'test.csv'를 'test_df'로 불러왔다고 가정
+    test_df = pd.read_csv('test.csv')
+    submission = pd.DataFrame({'Id': test_df['Id']})
+    print("✅ submission DataFrame이 Id 컬럼을 사용하여 생성되었습니다.")
+except FileNotFoundError:
+    print("❌ test.csv 파일을 찾을 수 없습니다. submission DataFrame을 직접 정의해야 합니다.")
+    # 파일이 없다면, Xtest의 인덱스를 Id로 사용하거나 수동으로 정의해야 함
+    # (예: submission = pd.DataFrame({'Id': Xtest.index}))
+
+
+# (이전 학습 코드와 예측값 계산은 성공적으로 완료되었다고 가정)
+# log_predictions = (Lasso_predictions + ENet_predictions + XGB_predictions + GBoost_predictions) / 4
+# log_predictions 변수에 예측값이 저장되어 있다고 가정합니다.
+
+# 앙상블 (평균) 및 평가
+log_train_predictions = (train_Lasso + train_ENet + train_XGB + train_GBoost) / 4
+train_score = np.sqrt(mean_squared_error(Ytrain, log_train_predictions))
+print(f"Scoring with train data : {train_score}")
+
+
+# 최종 예측 및 제출 파일 생성
+log_predictions = (Lasso_predictions + ENet_predictions + XGB_predictions + GBoost_predictions) / 4
+predictions = np.exp(log_predictions) - 1
+
+# **NameError 해결**
+submission['SalePrice'] = predictions
+submission.to_csv('Result.csv', index=False)
+
+print("✅ 예측 결과가 'Result.csv' 파일로 성공적으로 저장되었습니다.")
+
+
+
+
+# 끝!!!!!
+
+
