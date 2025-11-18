@@ -1,1 +1,1 @@
- <Axes: xlabel='SalePrice', ylabel='Density'>
+housepriceproject 
